@@ -104,6 +104,47 @@ plus `pyodbc`.
 
 ---
 
+### Working with the database (day-to-day)
+
+- Tables and relationships (see `migrations/01_schema_up.sql`)
+  - `DamageCategory` → `DamageType` (1:N) hold bilingual codes/names.
+  - `DamageType` → `SeverityBand` (1:N) defines size ranges per type + unit.
+  - `DamageType` ↔ `Activity` via `DamageTypeActivity`; ordering/required flags
+    live on the bridge.
+  - `PriceBookVersion` is the yearly price context; `ActivityCost` links
+    an activity + price book + optional severity band to labor/material costs
+    and units.
+  - `DamageTypeKeyword` is optional metadata for future text matching.
+
+- Insert or refresh data from a CSV (preferred) using `migrations/02_staging_and_load.sql`
+  1) Bulk drop rows into `dbo.StgDamageCost` via `Damage.LoadCsvToStaging @FilePath`.
+  2) Run `Damage.UpsertFromStaging @Language='nl'` (or `'en'` for code matching);
+     it MERGEs staging rows into all normalized tables, creating categories,
+     types, units, price books, severity bands, activities, bridges, and costs
+     as needed.
+  3) Clear the staging table if desired (`TRUNCATE TABLE dbo.StgDamageCost`).
+
+- Insert data manually (when not using staging)
+  - Make sure the price year exists in `Damage.PriceBookVersion`.
+  - Ensure units exist in `Damage.Unit` before referencing them.
+  - Create/lookup the `DamageType`, then create at least one `SeverityBand`
+    for it (range + unit).
+  - Insert activities in `Damage.Activity`, connect them via
+    `DamageTypeActivity`, and finally add costs in `Damage.ActivityCost`
+    keyed by activity + price book (+ severity band).
+
+- How the Python helpers tie in (file references)
+  - `scripts/manage_damage_schema.py`: runs all SQL migrations in order
+    (01–06) or a subset; use `--all` for full setup/refresh.
+  - `scripts/estimate_damage.py`: calls `Damage.EstimateDamageCost`
+    (defined in `migrations/03_view_and_proc.sql`) to verify prices for a
+    given damage code, size, unit, and year.
+  - `main.py`: quick table lister/previewer to sanity-check loaded data.
+  - `describe_table.py`: inspects the legacy `dbo.Kosten_Kodi_spreadsheet`
+    layout if you need to re-map incoming columns.
+
+---
+
 ### Migration details (current path)
 
 - `01_schema_up`: builds the Damage schema with bilingual codes/names and a computed severity key for indexing.
